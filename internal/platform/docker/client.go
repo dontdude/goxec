@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/dontdude/goxec/internal/domain"
 )
 
@@ -62,14 +64,17 @@ func (c *Client) Run(ctx context.Context, code string, language string) (string,
 
 	// 2. Create Container with Limits
 	// Configures a hard memory limit of 512MB via Cgroups to prevent resource exhaustion.
+	// Configures PidsLimit of 64 to prevent fork bombs.
 	slog.Info("Creating container", "image", imageName)
 	resp, err := c.cli.ContainerCreate(ctx, &container.Config{
 		Image: imageName,
 		Cmd:   []string{"python", "-c", code},
-		// Tty:   false, // We will use streaming later
+		// Tty must be false to allow multiplexed stdout/stderr for stdcopy
+		Tty: false,
 	}, &container.HostConfig{
 		Resources: container.Resources{
-			Memory: 512 * 1024 * 1024, // 512MB
+			Memory:    512 * 1024 * 1024, // 512MB
+			PidsLimit: pointInt64(64),    // Fork Bomb protection
 		},
 	}, nil, nil, "")
 	if err != nil {
@@ -77,9 +82,63 @@ func (c *Client) Run(ctx context.Context, code string, language string) (string,
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
 
-	slog.Info("Container created successfully", "containerID", resp.ID)
+	containerID := resp.ID
+	slog.Info("Container created", "containerID", containerID)
 
-	// 3. Return Stub
-	// Implementation of container start, attach, and wait pending.
-	return "Docker Client Ready", nil
+	// CLEANUP: Ensure container is removed even if we crash or timeout.
+	// Force: true guarantees removal even if the container is still running (stuck).
+	defer func() {
+		slog.Info("Removing container", "containerID", containerID)
+		if err := c.cli.ContainerRemove(context.Background(), containerID, container.RemoveOptions{Force: true}); err != nil {
+			slog.Error("Failed to remove container", "containerID", containerID, "error", err)
+		}
+	}()
+
+	// 3. Start Container
+	if err := c.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		return "", fmt.Errorf("failed to start container: %w", err)
+	}
+
+	// 4. Wait for Execution (Blocking)
+	// We use a select channel to handle both container exit and context cancellation (timeout).
+	statusCh, errCh := c.cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return "", fmt.Errorf("error waiting for container: %w", err)
+		}
+	case <-statusCh:
+		// Container exited successfully (or passed execution)
+	case <-ctx.Done():
+		// Context timeout, or cancellation by user
+		return "", fmt.Errorf("execution timed out: %w", ctx.Err())
+	}
+
+	// 5. Fetch Logs
+	// We fetch both Stdout and Stderr.
+	out, err := c.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to get logs: %w", err)
+	}
+	defer out.Close()
+
+	// 6. Demultiplex Logs (stdcopy)
+	// Docker streams combine stdout/stderr headers. stdcopy splits them.
+	var stdoutBuf, stderrBuf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, out); err != nil {
+		// If stdcopy fails, it might be due to Tty being true (which we disabled) or corruption.
+		return "", fmt.Errorf("failed to demultiplex logs: %w", err)
+	}
+
+	// TODO: Handle stderr explicitly in the Output struct. For now, we combine or prefer stdout.
+	return stdoutBuf.String() + stderrBuf.String(), nil
 }
+
+// Helper to get a pointer to an int64 (needed for HostConfig)
+func pointInt64(i int64) *int64 {
+	return &i
+}
+
