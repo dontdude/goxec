@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -127,18 +128,51 @@ func (c *Client) Run(ctx context.Context, code string, language string) (string,
 
 	// 6. Demultiplex Logs (stdcopy)
 	// Docker streams combine stdout/stderr headers. stdcopy splits them.
-	var stdoutBuf, stderrBuf bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, out); err != nil {
-		// If stdcopy fails, it might be due to Tty being true (which we disabled) or corruption.
-		return "", fmt.Errorf("failed to demultiplex logs: %w", err)
+	// We use a limited buffer to prevent OOM (1MB limit).
+	const maxLogSize = 1 * 1024 * 1024 // 1MB
+
+	stdoutBuf := &limitedBuffer{buf: new(bytes.Buffer), limit: maxLogSize}
+	stderrBuf := &limitedBuffer{buf: new(bytes.Buffer), limit: maxLogSize}
+
+	if _, err := stdcopy.StdCopy(stdoutBuf, stderrBuf, out); err != nil {
+		// Ignore limit "errors" as they are just execution limits, not system failures.
+		// Real system failures from stdcopy are rare but should be logged.
+		if !errors.Is(err, errLogLimitExceeded) {
+			return "", fmt.Errorf("failed to demultiplex logs: %w", err)
+		}
+		slog.Warn("Log limit exceeded", "containerID", containerID)
 	}
 
-	// TODO: Handle stderr explicitly in the Output struct. For now, we combine or prefer stdout.
 	return stdoutBuf.String() + stderrBuf.String(), nil
+}
+
+// limitedBuffer is a custom writer that enforces a hard size limit.
+type limitedBuffer struct {
+	buf   *bytes.Buffer
+	limit int
+}
+
+// errLogLimitExceeded is the sentinel error when logs are truncated.
+var errLogLimitExceeded = errors.New("log limit exceeded")
+
+func (l *limitedBuffer) Write(p []byte) (n int, err error) {
+	if l.buf.Len()+len(p) > l.limit {
+		// Calculate how much we CAN write before hitting the limit
+		remaining := l.limit - l.buf.Len()
+		if remaining > 0 {
+			l.buf.Write(p[:remaining])
+			l.buf.WriteString("\n<LOG TRUNCATED>")
+		}
+		return remaining, errLogLimitExceeded
+	}
+	return l.buf.Write(p)
+}
+
+func (l *limitedBuffer) String() string {
+	return l.buf.String()
 }
 
 // Helper to get a pointer to an int64 (needed for HostConfig)
 func pointInt64(i int64) *int64 {
 	return &i
 }
-
