@@ -19,12 +19,12 @@ type ContainerRunner interface {
 // Job represents a unit of work to be executed.
 // It carries the Code and Language payload, along with a channel to report the result.
 type Job struct {
-	ID       string
-	Code     string
-	Language string
+	ID       string `json:"id"`
+	Code     string `json:"code"`
+	Language string `json:"language"`
 	// ResultCh is where the worker sends the execution result.
 	// It is a send only channel (chan<-) to ensure the worker cannot read from it.
-	ResultCh chan<- JobResult
+	ResultCh chan<- JobResult `json:"-"`
 }
 
 // JobResult encapsulates the result of a job execution.
