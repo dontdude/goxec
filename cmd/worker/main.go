@@ -1,15 +1,15 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/dontdude/goxec/internal/domain"
 	"github.com/dontdude/goxec/internal/platform/docker"
+	"github.com/dontdude/goxec/internal/platform/queue"
 	"github.com/dontdude/goxec/internal/worker"
 )
 
@@ -19,8 +19,10 @@ func main() {
 	slog.SetDefault(logger)
 	slog.Info("Starting Goxec Worker Node...")
 
-	// 2. Initialize Docker Client
+	// 2. Initialize Config/Adapters
+	redisAddr := "localhost:6379"
 	dockerClient := docker.NewClient()
+	redisQ := queue.NewRedisQueue(redisAddr, "goxec:jobs", "goxec:workers")
 
 	// 3. Initialize Worker Pool (Concurrency: 3)
 	concurrency := 3
@@ -28,53 +30,49 @@ func main() {
 	pool.Start()
 	defer pool.Stop() // Ensure cleanup on exit
 
-	// 4. Handle Shutdown Signals
+	// 4. Subscribe to Jobs
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	jobsCh, err := redisQ.Subscribe(ctx)
+	if err != nil {
+		slog.Error("Failed to subscribe to queue", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("Worker Node listening for jobs...")
+
+	// 5. Handle Shutdown Signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
-	// 5. Submit Test Jobs
-	// We'll create a Result Channel to read back results
-	resultCh := make(chan domain.JobResult)
-
+	// 6. Main Loop: Pipe Jobs from Redis -> Worker Pool
 	go func() {
-		// Verify: Submit 5 jobs (more than concurrency) to see buffering/wait
-		for i := 1; i <= 5; i++ {
-			jobID := fmt.Sprintf("job-%d", i)
-			code := fmt.Sprintf("print('Hello from Job %d')", i)
+		for job := range jobsCh {
+			slog.Info("Received job from Redis", "jobID", job.ID)
 			
-			slog.Info("Submitting job", "jobID", jobID)
-			pool.Submit(domain.Job{
-				ID:       jobID,
-				Code:     code,
-				Language: "python",
-				ResultCh: resultCh,
-			})
-			// Slight delay to simulate staggered arrival, or just blast them
-			time.Sleep(100 * time.Millisecond)
+			// We need a Result Channel to handle the output
+			// For now, we just print it to stdout to verify End-to-End
+			resCh := make(chan domain.JobResult)
+			job.ResultCh = resCh
+			
+			pool.Submit(job)
+
+			// Spawn a goroutine to log the result of THIS specific job
+			go func(id string, ch <-chan domain.JobResult) {
+				result := <-ch
+				if result.Error != nil {
+					slog.Error("Job Execution Failed", "jobID", id, "error", result.Error)
+				} else {
+					slog.Info("Job Successfully Executed", "jobID", id, "output", result.Output)
+				}
+			}(job.ID, resCh)
 		}
 	}()
 
-	// 6. Loop and Wait
-	// In a real app, this would be consuming from Redis.
-	// Here we just wait for 5 results or a signal.
-	completed := 0
-	for {
-		select {
-		case res := <-resultCh:
-			completed++
-			if res.Error != nil {
-				slog.Error("Job failed", "error", res.Error)
-			} else {
-				slog.Info("Job completed", "output", res.Output)
-			}
-			if completed == 5 {
-				slog.Info("All verification jobs completed. Exiting.")
-				return
-			}
-		case <-sigCh:
-			slog.Info("Shutdown signal received")
-			// defer pool.Stop() will run now
-			return
-		}
-	}
+	// Wait for termination
+	<-sigCh
+	slog.Info("Shutdown signal received")
+	cancel() // Stop Redis subscriber
+	// atomic shutdown of pool is handled by defer
 }
