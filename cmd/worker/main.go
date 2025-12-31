@@ -58,15 +58,23 @@ func main() {
 			
 			pool.Submit(job)
 
-			// Spawn a goroutine to log the result of THIS specific job
-			go func(id string, ch <-chan domain.JobResult) {
+			// Spawn a goroutine to log the result and acknowledge the job.
+			// The original job struct is passed to access the RawID.
+			go func(j domain.Job, ch <-chan domain.JobResult) {
 				result := <-ch
 				if result.Error != nil {
-					slog.Error("Job Execution Failed", "jobID", id, "error", result.Error)
+					// Ack failure scenarios to prevent infinite redelivery (until DLQ is implemented).
+					slog.Error("Job Execution Failed", "jobID", j.ID, "error", result.Error)
 				} else {
-					slog.Info("Job Successfully Executed", "jobID", id, "output", result.Output)
+					slog.Info("Job Successfully Executed", "jobID", j.ID, "output", result.Output)
 				}
-			}(job.ID, resCh)
+
+				// Acknowledge processing completion to Redis.
+				slog.Info("Acknowledging job", "jobID", j.ID, "streamID", j.RawID)
+				if err := redisQ.Acknowledge(context.Background(), j.RawID); err != nil {
+					slog.Error("Failed to ACK job", "jobID", j.ID, "error", err)
+				}
+			}(job, resCh)
 		}
 	}()
 

@@ -128,8 +128,8 @@ func (r *RedisQueue) Subscribe(ctx context.Context) (<-chan domain.Job, error) {
 							continue
 						}
 						
-						// In Phase 2a, we are not ACKing yet. 
-						// We'll add ACK logic later, or Auto-ACK here if needed.
+						// Capture the Redis Stream ID so we can ACK later
+						job.RawID = msg.ID
 						
 						outCh <- job
 					}
@@ -138,4 +138,9 @@ func (r *RedisQueue) Subscribe(ctx context.Context) (<-chan domain.Job, error) {
 		}
 	}()
 	return outCh, nil
+}
+
+// Acknowledge confirms processing using XACK. 
+func (r *RedisQueue) Acknowledge(ctx context.Context, jobID string) error {
+	return r.client.XAck(ctx, r.stream, r.group, jobID).Err()
 }

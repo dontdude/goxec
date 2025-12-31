@@ -22,6 +22,11 @@ type Job struct {
 	ID       string `json:"id"`
 	Code     string `json:"code"`
 	Language string `json:"language"`
+
+	// RawID is the internal Stream ID from Redis (e.g. 1700000-0).
+	// We need this to Acknowledge the message later. 
+	RawID string `json:"-"`
+
 	// ResultCh is where the worker sends the execution result.
 	// It is a send only channel (chan<-) to ensure the worker cannot read from it.
 	ResultCh chan<- JobResult `json:"-"`
