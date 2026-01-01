@@ -1,15 +1,24 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 
-    "github.com/dontdude/goxec/internal/domain"
+	"github.com/dontdude/goxec/internal/domain"
 	"github.com/dontdude/goxec/internal/platform/queue"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+)
+
+// Global Hub to manage active WebSocket connections.
+// Map key: JobID -> Value: WebSocket Connection
+var (
+	clientHub = make(map[string]*websocket.Conn)
+	hubMu	  sync.RWMutex
 )
 
 func main() {
@@ -20,16 +29,19 @@ func main() {
 	// 2. Initialize Redis Queue (as a dependency)
 	redisQ := queue.NewRedisQueue("localhost:6379", "goxec:jobs", "goxec:workers")
 
-	// 3. Setup Router (Standard Lib)
+	// 3. Start Log Broadcaster (Background goroutine)
+	go broadcastLogs(redisQ)
+
+	// 4. Setup Router (Standard Lib)
 	mux := http.NewServeMux()
 
-	// 4. Register Handlers
+	// 5. Register Handlers
 	// Post /submit -> Enqueues Job
 	mux.HandleFunc("POST /submit", handleSubmit(redisQ))
 	// Get /ws -> WebSocket Updgrade
 	mux.HandleFunc("GET /ws", handleWS())
 
-	// 4. Middleware (CORS)
+	// 6. Middleware (CORS)
 	handler := enableCORS(mux)
 
 	slog.Info("API Server starting on :8080")
@@ -90,24 +102,42 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {return true}, // Allow all origins for dev
 }
 
-// handleWS upgrades the connection to WebSocket.
+// handleWS upgrades the connection to WebSocket and registers it to hub.
 func handleWS() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// 1. Extract JobID from Query Params
+		jobID := r.URL.Query().Get("job_id")
+		if jobID == "" {
+			http.Error(w, "job_id is required", http.StatusBadRequest)
+			return
+		}
+
+		// 2. Upgrade to WebSocket
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			slog.Error("WebSocket upgrade failed", "error", err)
 			return
 		}
-		defer conn.Close()
 
+		// 3. Register to Hub
 		slog.Info("Client connected via WebSocket", "remoteAddr", conn.RemoteAddr())
+		hubMu.Lock()
+		clientHub[jobID] = conn
+		hubMu.Unlock()
 
-		// Stub Loop: Keep connection alive until client disconnects
+		// 4. Clean up on disconnect
+		defer func() {
+			slog.Info("Client Disconnected", "jobID", jobID)
+			hubMu.Lock()
+			delete(clientHub, jobID)
+			hubMu.Unlock()
+			conn.Close()
+		}()
+
+		// 5. Stub Loop: Keep connection alive until client disconnects
 		for {
-			// Read message (ignore content for now)
 			_, _, err := conn.ReadMessage()
 			if err != nil {
-				slog.Info("Client Disconnected", "error", err)
 				break
 			}
 		}
@@ -130,4 +160,38 @@ func enableCORS(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// broadcastLogs listens to the Redis Pub/Sub channel and forwards messages to connected clients.
+func broadcastLogs(q domain.JobQueue) {
+	slog.Info("Starting Log Broadcaster...")
+
+	// Subscribe to all logs
+	logsCh, err := q.SubscribeLogs(context.Background())
+	if err != nil {
+		slog.Error("Failed to subscribe to logs", "error", err)
+		os.Exit(1)
+	}
+
+	for logEntry := range logsCh {
+		// 1. Check if we have a client connected for this JobID
+		hubMu.RLock()
+		conn, exists := clientHub[logEntry.JobID]
+		hubMu.RUnlock()
+
+		if exists {
+			// 2. Forward the message to the WebSocket
+			// Formatting it as a JSON message for the frontend
+			err := conn.WriteJSON(map[string]string{
+				"type":   "log",
+				"output": logEntry.Output,
+			})
+
+			if err != nil {
+				slog.Error("Failed to write to websocket", "jobID", logEntry.JobID, "error", err)
+				// If write fails, we should probably close and remove the connection, 
+				// but just logging it for now
+			}
+		}
+	}
 }
