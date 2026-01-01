@@ -27,35 +27,70 @@ const Terminal = forwardRef<TerminalHandle>((_, ref) => {
     }));
 
     useEffect(() => {
-        if (!terminalRef.current) return;
+        let fitAddon: FitAddon | null = null;
+        let resizeListener: (() => void) | null = null;
 
-        const term = new XTerm({
-            cursorBlink: true,
-            theme: {
-                background: '#1e1e1e',
-                foreground: '#cccccc',
-            },
-            fontSize: 14,
-            fontFamily: 'Consolas, "Courier New", monospace',
-        });
+        const initTerminal = () => {
+             if (xtermRef.current || !terminalRef.current) return;
+             if (terminalRef.current.clientWidth === 0 || terminalRef.current.clientHeight === 0) return;
 
-        const fitAddon = new FitAddon();
-        term.loadAddon(fitAddon);
+             const term = new XTerm({
+                cursorBlink: true,
+                theme: {
+                    background: '#1e1e1e',
+                    foreground: '#cccccc',
+                },
+                fontSize: 14,
+                fontFamily: 'Consolas, "Courier New", monospace',
+                allowProposedApi: true,
+            });
 
-        term.open(terminalRef.current);
-        fitAddon.fit();
-        
-        xtermRef.current = term;
+            fitAddon = new FitAddon();
+            term.loadAddon(fitAddon);
 
-        // Resize observer to handle window resizing
+            term.open(terminalRef.current);
+            try {
+                fitAddon.fit();
+            } catch (e) {
+                console.warn("Initial fit failed", e);
+            }
+            
+            xtermRef.current = term;
+
+             // Handle window resizes
+             resizeListener = () => {
+                 try {
+                     fitAddon?.fit();
+                 } catch (e) {
+                     console.warn("Resize fit failed", e);
+                 }
+             };
+             window.addEventListener('resize', resizeListener);
+        };
+
         const resizeObserver = new ResizeObserver(() => {
-            fitAddon.fit();
+            if (!xtermRef.current) {
+                initTerminal();
+            } else {
+                try {
+                    fitAddon?.fit();
+                } catch(e) {}
+            }
         });
-        resizeObserver.observe(terminalRef.current);
+        
+        if (terminalRef.current) {
+            resizeObserver.observe(terminalRef.current);
+        }
 
         return () => {
             resizeObserver.disconnect();
-            term.dispose();
+            if (resizeListener) {
+                window.removeEventListener('resize', resizeListener);
+            }
+            if (xtermRef.current) {
+                xtermRef.current.dispose();
+                xtermRef.current = null;
+            }
         };
     }, []);
 
