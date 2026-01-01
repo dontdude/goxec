@@ -1,52 +1,25 @@
-import { useRef } from 'react';
+import { useRef, useState, useCallback } from 'react';
 import type { TerminalHandle } from '../components/Terminal';
 
 interface UseJobRunnerProps {
-    code: string;
     terminalRef: React.RefObject<TerminalHandle | null>;
 }
 
-export const useJobRunner = ({ code, terminalRef }: UseJobRunnerProps) => {
-    // Keep track of active socket to close it if needed (optional cleanup)
+export type JobStatus = 'idle' | 'queued' | 'running' | 'completed' | 'error';
+
+export const useJobRunner = ({ terminalRef }: UseJobRunnerProps) => {
+    const [status, setStatus] = useState<JobStatus>('idle');
     const wsRef = useRef<WebSocket | null>(null);
 
-    const runCode = async () => {
-        // Reset Terminal state
-        termClear();
-        termPrintln("Compiling and Scheduling Job...");
+    const termPrint = useCallback((msg: string) => {
+        terminalRef.current?.write(msg);
+    }, [terminalRef]);
 
-        try {
-            // 1. Submit Job via HTTP
-            const response = await fetch('http://localhost:8080/submit', {
-                method: 'POST',
-                headers: { 'Content-type': 'application/json' },
-                body: JSON.stringify({
-                    code: code,
-                    language: 'python',
-                }),
-            });
+    const termPrintln = useCallback((msg: string) => {
+        terminalRef.current?.writeln(msg);
+    }, [terminalRef]);
 
-            if (!response.ok) {
-                throw new Error(`Submission failed: ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            const jobID = data.job_id;
-
-            termPrintln(`Job Queued (ID: ${jobID})`);
-            termPrintln("--> Connecting to Live Logs...");
-
-            // 2. Connect to WebSocket for Real-time Logs
-            connectWebSocket(jobID);
-
-        } catch (error) {
-            console.error(error);
-            termPrintln(`\r\n[Fatal Error] ${error}`);
-            alert('Error submitting job');
-        }
-    };
-
-    const connectWebSocket = (jobID: string) => {
+    const connectWebSocket = useCallback((jobID: string) => {
         if (wsRef.current) {
             wsRef.current.close();
         }
@@ -55,46 +28,66 @@ export const useJobRunner = ({ code, terminalRef }: UseJobRunnerProps) => {
         wsRef.current = ws;
 
         ws.onopen = () => {
-            // Connection established
+            setStatus('running');
         };
 
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'log') {
-                    // Convert backend newlines to CRLF for xterm.js
-                    const formattedOutput = msg.output.replace(/\n/g, '\r\n');
-                    termPrint(formattedOutput);
+                    // Normalize newlines for xterm
+                    const formatted = msg.output.replace(/\n/g, '\r\n');
+                    termPrint(formatted);
                 }
             } catch (e) {
-                console.error("Invalid log format", e);
+                console.error("Failed to parse log", e);
             }
         };
 
         ws.onclose = () => {
-            termPrintln("\r\n--- Connection Closed ---");
+            termPrintln("\r\n\x1b[90m--- Session Ended ---\x1b[0m");
+            setStatus('completed');
         };
 
-        ws.onerror = (err) => {
-            termPrintln(`\r\n[Error] WebSocket Error`);
-            console.error(err);
+        ws.onerror = () => {
+            termPrintln(`\r\n\x1b[31m[System] WebSocket Connection Error\x1b[0m`);
+            setStatus('error');
         };
-    };
+    }, [termPrint, termPrintln]);
 
-    // Helper to clear terminal
-    const termClear = () => {
+    const run = useCallback(async (code: string, language: string) => {
+        if (status === 'running' || status === 'queued') return;
+
         terminalRef.current?.clear();
-    };
+        setStatus('queued');
+        termPrintln(`\x1b[36m--> Scheduling Job (${language})...\x1b[0m`);
 
-    // Helper to safely write to terminal (with newline)
-    const termPrintln = (msg: string) => {
-        terminalRef.current?.writeln(msg);
-    };
+        try {
+            const response = await fetch('http://localhost:8080/submit', {
+                method: 'POST',
+                headers: { 'Content-type': 'application/json' },
+                body: JSON.stringify({ code, language }),
+            });
 
-    // Helper to safely write to terminal (raw, no newline)
-    const termPrint = (msg: string) => {
-        terminalRef.current?.write(msg);
-    };
+            if (!response.ok) {
+                throw new Error(`API Error: ${response.statusText}`);
+            }
 
-    return { runCode };
+            const data = await response.json();
+            termPrintln(`\x1b[32m--> Job Queued ID: ${data.job_id}\x1b[0m`);
+            termPrintln("\x1b[90m--> Connecting to log stream...\x1b[0m\r\n");
+
+            connectWebSocket(data.job_id);
+
+        } catch (error) {
+            console.error(error);
+            termPrintln(`\r\n\x1b[31;1m[Fatal Error] Failed to submit job: ${error}\x1b[0m`);
+            setStatus('error');
+        }
+    }, [status, terminalRef, connectWebSocket, termPrintln]);
+
+    return {
+        run,
+        status
+    };
 };

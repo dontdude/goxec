@@ -3,37 +3,50 @@ import CodeEditor from './components/CodeEditor';
 import Terminal, { type TerminalHandle } from './components/Terminal';
 import { useJobRunner } from './hooks/useJobRunner';
 
-const INITIAL_CODE = "print('Hello from Goxec!')";
+const INITIAL_CODE = `print("Hello from Goxec!")
+import time
+for i in range(5):
+    print(f"Processing step {i+1}...")
+    time.sleep(0.5)
+print("Done.")`;
 
 function App() {
   const [code, setCode] = useState<string>(INITIAL_CODE);
   const termRef = useRef<TerminalHandle>(null);
   
-  const { runCode } = useJobRunner({ code, terminalRef: termRef });
+  const { run, status } = useJobRunner({ terminalRef: termRef });
+
+  const handleRun = () => {
+      run(code, 'python');
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#1e1e1e', color: 'white' }}>
-      {/* Header */}
-      <div style={{ padding: '10px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #333' }}>
-        <h3>Goxec Remote Runner</h3>
-        <button onClick={runCode} style={{ padding: '8px 16px', backgroundColor: '#4caf50', color: 'white', border: 'none', cursor: 'pointer' }}>
-          Run Code
+    <>
+      <header className="header">
+        <div className="logo">GOXEC</div>
+        <button 
+            className="btn-run" 
+            onClick={handleRun}
+            disabled={status === 'queued' || status === 'running'}
+        >
+          {status === 'running' ? 'Running...' : 'Run Code'}
         </button>
-      </div>
+      </header>
 
-      {/* Main Content: Split Screen */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Left: Editor (50%) */}
-        <div style={{ flex: 1, borderRight: '1px solid #333' }}>
+      <div className="main-layout">
+        {/* Editor Pane (Left/Top) */}
+        <div className="editor-pane">
+          <div className="pane-header">Editor - main.py</div>
           <CodeEditor code={code} onChange={(val) => setCode(val || '')} />
         </div>
 
-        {/* Right: XTerm Console (50%) */}
-        <div style={{ flex: 1, backgroundColor: '#1e1e1e' }}>
-          <Terminal ref={termRef} />
+        {/* Terminal Pane (Right/Bottom) */}
+        <div className="terminal-pane">
+            <div className="pane-header">Terminal</div>
+            <Terminal ref={termRef} />
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

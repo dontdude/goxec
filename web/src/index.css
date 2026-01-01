@@ -1,22 +1,101 @@
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #333333;
+  --accent-color: #0e639c;
+  --text-primary: #cccccc;
+  --text-secondary: #858585;
+  --border-color: #454545;
+  --success-color: #4caf50;
+  
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   line-height: 1.5;
-  font-weight: 400;
-  color-scheme: dark;
-  background-color: #1e1e1e;
-  margin: 0;
-  padding: 0;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
 }
 
 body {
   margin: 0;
   padding: 0;
   width: 100vw;
-  height: 100vh;
-  display: block;
+  height: 100vh; 
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 #root {
-  width: 100%;
+  display: flex;
+  flex-direction: column;
   height: 100%;
+}
+
+.header {
+  height: 50px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1rem;
+}
+
+.logo {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+
+.btn-run {
+  background-color: var(--success-color);
+  color: white;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: opacity 0.2s;
+}
+
+.btn-run:hover {
+  opacity: 0.9;
+}
+
+.btn-run:disabled {
+  background-color: var(--bg-tertiary);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.main-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-pane {
+  flex: 6; /* 60% */
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--bg-tertiary);
+}
+
+.terminal-pane {
+  flex: 4; /* 40% */
+  display: flex; 
+  flex-direction: column;
+  background-color: var(--bg-primary);
+}
+
+.pane-header {
+  height: 35px;
+  background-color: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  padding-left: 1rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
 }
