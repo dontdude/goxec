@@ -49,10 +49,22 @@ func NewClient() *Client {
 // Run executes the provided code within an ephemeral Docker container.
 // It enforces resource limits (memory) and context cancellation.
 func (c *Client) Run(ctx context.Context, code string, language string) (string, error) {
-	// 1. Pull Image
-	// TODO: Extract image name resolution to a configuration or map.
-	imageName := "python:alpine"
+	// 1. Determine Image and Command based on Language
+	var imageName string
+	var cmd []string
+
+	switch language {
+	case "python":
+		imageName = "python:alpine"
+		cmd = []string{"python", "-c", code}
+	case "javascript":
+		imageName = "node:18-alpine"
+		cmd = []string{"node", "-e", code}
+	default:
+		return "", fmt.Errorf("unsupported language: %s", language)
+	}
 	
+	// 2. Pull Image
 	slog.Info("Pulling image", "image", imageName)
 	reader, err := c.cli.ImagePull(ctx, imageName, image.PullOptions{})
 	if err != nil {
@@ -63,13 +75,13 @@ func (c *Client) Run(ctx context.Context, code string, language string) (string,
 	defer reader.Close()
 	io.Copy(io.Discard, reader)
 
-	// 2. Create Container with Limits
+	// 3. Create Container with Limits
 	// Configures a hard memory limit of 512MB via Cgroups to prevent resource exhaustion.
 	// Configures PidsLimit of 64 to prevent fork bombs.
 	slog.Info("Creating container", "image", imageName)
 	resp, err := c.cli.ContainerCreate(ctx, &container.Config{
 		Image: imageName,
-		Cmd:   []string{"python", "-c", code},
+		Cmd:   cmd,
 		// Tty must be false to allow multiplexed stdout/stderr for stdcopy
 		Tty: false,
 	}, &container.HostConfig{
@@ -95,12 +107,12 @@ func (c *Client) Run(ctx context.Context, code string, language string) (string,
 		}
 	}()
 
-	// 3. Start Container
+	// 4. Start Container
 	if err := c.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 		return "", fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// 4. Wait for Execution (Blocking)
+	// 5. Wait for Execution (Blocking)
 	// We use a select channel to handle both container exit and context cancellation (timeout).
 	statusCh, errCh := c.cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
 	select {
@@ -115,7 +127,7 @@ func (c *Client) Run(ctx context.Context, code string, language string) (string,
 		return "", fmt.Errorf("execution timed out: %w", ctx.Err())
 	}
 
-	// 5. Fetch Logs
+	// 6. Fetch Logs
 	// We fetch both Stdout and Stderr.
 	out, err := c.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
 		ShowStdout: true,
@@ -126,7 +138,7 @@ func (c *Client) Run(ctx context.Context, code string, language string) (string,
 	}
 	defer out.Close()
 
-	// 6. Demultiplex Logs (stdcopy)
+	// 7. Demultiplex Logs (stdcopy)
 	// Docker streams combine stdout/stderr headers. stdcopy splits them.
 	// We use a limited buffer to prevent OOM (1MB limit).
 	const maxLogSize = 1 * 1024 * 1024 // 1MB
