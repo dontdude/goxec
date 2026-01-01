@@ -15,4 +15,10 @@ type JobQueue interface {
 	// Acknowledge confirms that a job has been successfully processed. 
 	// This removes it from the Pending Entry list (PEL).
 	Acknowledge(ctx context.Context, jobID string) error
+
+	// Broadcast publishes the job execution result to the Pub/Sub channel.
+	Broadcast(ctx context.Context, jobID string, output string) error
+
+	// SubscribeLogs returns a channel that streams execution results from all workers.
+	SubscribeLogs(ctx context.Context) (<-chan JobResult, error)
 }

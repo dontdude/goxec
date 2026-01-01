@@ -144,3 +144,61 @@ func (r *RedisQueue) Subscribe(ctx context.Context) (<-chan domain.Job, error) {
 func (r *RedisQueue) Acknowledge(ctx context.Context, jobID string) error {
 	return r.client.XAck(ctx, r.stream, r.group, jobID).Err()
 }
+
+// Broadcast publishes the execution result to the "goxec:logs" channel.
+func (r *RedisQueue) Broadcast(ctx context.Context, jobID string, output string) error {
+	msg := domain.JobResult{
+		JobID:  jobID, 
+		Output: output,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal log: %w", err)
+	}
+
+	return r.client.Publish(ctx, "goxec:logs", data).Err()
+}
+
+// SubscribeLogs subscribes to "goxec:logs" and streams results to a Go channel.
+func (r *RedisQueue) SubscribeLogs(ctx context.Context) (<-chan domain.JobResult, error) {
+	// Create the PubSub connection
+	pubsub := r.client.Subscribe(ctx, "goxec:logs")
+
+	// Wait for confirmation that we are subscribed
+	if _, err := pubsub.Receive(ctx); err != nil {
+		return nil, fmt.Errorf("failed to subscribe to logs: %w", err)
+	}
+
+	// Create output channel
+	outCh := make(chan domain.JobResult)
+
+	// Spawn background listener
+	go func() {
+		defer close(outCh)
+		defer pubsub.Close()
+
+		ch := pubsub.Channel()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+
+				var result domain.JobResult
+				if err := json.Unmarshal([]byte(msg.Payload), &result); err != nil {
+					slog.Error("Failed to unmarshal log", "error", err)
+					continue
+				}
+
+				outCh <- result
+			}
+		}
+	}()
+
+	return outCh, nil
+} 

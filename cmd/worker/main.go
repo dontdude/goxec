@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -46,7 +47,7 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
-	// 6. Main Loop: Pipe Jobs from Redis -> Worker Pool
+	// 6. Goroutine to Channel Jobs from Redis -> Worker Pool
 	go func() {
 		for job := range jobsCh {
 			slog.Info("Received job from Redis", "jobID", job.ID)
@@ -62,6 +63,8 @@ func main() {
 			// The original job struct is passed to access the RawID.
 			go func(j domain.Job, ch <-chan domain.JobResult) {
 				result := <-ch
+				
+				// 1. Log job execution result
 				if result.Error != nil {
 					// Ack failure scenarios to prevent infinite redelivery (until DLQ is implemented).
 					slog.Error("Job Execution Failed", "jobID", j.ID, "error", result.Error)
@@ -69,7 +72,18 @@ func main() {
 					slog.Info("Job Successfully Executed", "jobID", j.ID, "output", result.Output)
 				}
 
-				// Acknowledge processing completion to Redis.
+				// 2. Broadcast to Pub/Sub
+				// Send the output back to customers.
+				output := result.Output
+				if result.Error != nil {
+					output = fmt.Sprintf("Error: %v", result.Error)
+				}
+
+				if err := redisQ.Broadcast(context.Background(), j.ID, output); err != nil {
+					slog.Error("Failed to broadcast log", "jobID", j.ID, "error", err)
+				}
+
+				// 3. Acknowledge processing completion to Redis.
 				slog.Info("Acknowledging job", "jobID", j.ID, "streamID", j.RawID)
 				if err := redisQ.Acknowledge(context.Background(), j.RawID); err != nil {
 					slog.Error("Failed to ACK job", "jobID", j.ID, "error", err)

@@ -34,6 +34,7 @@ type Job struct {
 
 // JobResult encapsulates the result of a job execution.
 type JobResult struct {
-	Output string
-	Error  error
+	JobID  string `json:"job_id"`
+	Output string `json:"output"`
+	Error  error  `json:"-"`
 }
