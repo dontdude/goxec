@@ -24,7 +24,7 @@ export const useJobRunner = ({ terminalRef }: UseJobRunnerProps) => {
             wsRef.current.close();
         }
 
-        const ws = new WebSocket(`ws://localhost:8080/ws?job_id=${jobID}`);
+        const ws = new WebSocket(`ws://localhost:8080/api/ws?job_id=${jobID}`);
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -87,7 +87,7 @@ export const useJobRunner = ({ terminalRef }: UseJobRunnerProps) => {
         termPrintln(`\x1b[36m--> Scheduling Job (${language})...\x1b[0m`);
 
         try {
-            const response = await fetch('http://localhost:8080/submit', {
+            const response = await fetch('http://localhost:8080/api/run', {
                 method: 'POST',
                 headers: { 'Content-type': 'application/json' },
                 body: JSON.stringify({ code, language }),

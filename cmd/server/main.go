@@ -41,11 +41,11 @@ func main() {
 	mux := http.NewServeMux()
 
 	// 6. Register Handlers
-	// Post /submit -> Enqueues Job (Wrapped with RateLimit)
-	mux.HandleFunc("POST /submit", limiter.RateLimitMiddleware(handleSubmit(redisQ)))
+	// Post /api/run -> Enqueues Job (Wrapped with RateLimit)
+	mux.HandleFunc("POST /api/run", limiter.RateLimitMiddleware(handleSubmit(redisQ)))
 
-	// Get /ws -> WebSocket Updgrade
-	mux.HandleFunc("GET /ws", handleWS())
+	// Get /api/ws -> WebSocket Updgrade
+	mux.HandleFunc("GET /api/ws", handleWS())
 
 	// 7. Middleware (CORS)
 	handler := enableCORS(mux)
