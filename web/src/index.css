@@ -1,101 +1,160 @@
 :root {
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #252526;
-  --bg-tertiary: #333333;
-  --accent-color: #0e639c;
-  --text-primary: #cccccc;
-  --text-secondary: #858585;
-  --border-color: #454545;
-  --success-color: #4caf50;
-  
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  line-height: 1.5;
-  color: var(--text-primary);
-  background-color: var(--bg-primary);
+  --bg-header: #161b22;   
+  --bg-editor: #1e1e1e;   
+  --bg-terminal: #0d1117; 
+  --border-color: #30363d;
+  --accent-green: #238636;
+  --accent-green-hover: #2ea043;
+  --text-primary: #c9d1d9;
+  --text-active: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
   padding: 0;
-  width: 100vw;
-  height: 100vh; 
+  background-color: var(--bg-editor);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  height: 100vh;
   overflow: hidden;
-  box-sizing: border-box;
 }
 
-#root {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+/* --- Layout --- */
+.layout-root {
+  display: grid;
+  grid-template-rows: 60px 1fr;
+  height: 100vh;
+  width: 100vw;
 }
 
+/* --- Header --- */
 .header {
-  height: 50px;
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--bg-tertiary);
+  background-color: var(--bg-header);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1rem;
+  padding: 0 24px;
 }
 
-.logo {
-  font-weight: 600;
-  font-size: 1.1rem;
-  color: #fff;
-  letter-spacing: 0.5px;
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-active);
+    user-select: none;
+}
+.brand-icon {
+    font-family: monospace;
+    font-weight: 700;
+    font-size: 20px;
+    color: var(--accent-green);
+}
+.brand-text {
+    font-family: 'Segoe UI', sans-serif;
+    font-weight: 600;
+    font-size: 18px;
+    /* Clean look requested */
 }
 
+/* Right Control Group */
+.controls-group {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* Segmented Toggle */
+.lang-toggle {
+    background-color: #21262d; 
+    border-radius: 6px; 
+    padding: 3px;
+    display: flex;
+    align-items: center;
+    height: 32px;
+}
+
+.toggle-item {
+    background: transparent;
+    border: none;
+    color: #8b949e;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 0 12px;
+    height: 100%;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+.toggle-item:hover {
+    color: var(--text-primary);
+}
+.toggle-item.active {
+    background-color: #30363d; /* Dark gray highlight */
+    color: var(--text-active);
+}
+
+/* Divider */
+.header-divider {
+    width: 1px;
+    height: 24px;
+    background-color: #30363d;
+}
+
+/* Actions */
 .btn-run {
-  background-color: var(--success-color);
-  color: white;
-  border: none;
-  padding: 6px 16px;
-  border-radius: 2px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  transition: opacity 0.2s;
+    background-color: var(--accent-green);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 16px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    transition: background-color 0.2s;
+    /* Removed transform here as requested */
+}
+.btn-run:hover:not(:disabled) {
+    background-color: var(--accent-green-hover);
+}
+.btn-run.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
-.btn-run:hover {
-  opacity: 0.9;
+.spinner {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+    font-size: 16px;
+}
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
+
+/* --- Main Content --- */
+.main-content {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    overflow: hidden;
 }
 
-.btn-run:disabled {
-  background-color: var(--bg-tertiary);
-  cursor: not-allowed;
-  opacity: 0.5;
+.pane-editor {
+    background-color: var(--bg-editor);
+    border-right: 1px solid var(--border-color);
+    position: relative;
+    overflow: hidden;
 }
 
-.main-layout {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-.editor-pane {
-  flex: 6; /* 60% */
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--bg-tertiary);
-}
-
-.terminal-pane {
-  flex: 4; /* 40% */
-  display: flex; 
-  flex-direction: column;
-  background-color: var(--bg-primary);
-}
-
-.pane-header {
-  height: 35px;
-  background-color: var(--bg-secondary);
-  display: flex;
-  align-items: center;
-  padding-left: 1rem;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--text-secondary);
+.pane-terminal {
+    background-color: var(--bg-terminal);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }

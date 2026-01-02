@@ -3,37 +3,50 @@ import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 
+// --- Constants ---
+
+const TERMINAL_THEME = {
+    background: '#0d1117', // GitHub Dark Dim
+    foreground: '#c9d1d9',
+    selectionBackground: '#264f78',
+    cursor: '#0d1117', // Hide default cursor (read-only)
+};
+
+const FONT_FAMILY = "'JetBrains Mono', 'Consolas', monospace";
+
 /**
- * Interface for the imperative handle exposed by the Terminal component.
- * Allows parent components to control the terminal instance.
+ * Handle exposing imperative methods to the parent component.
  */
 export interface TerminalHandle {
-    /** Write data to the terminal. */
+    /** Write raw string data to the terminal. */
     write: (data: string) => void;
     /** Write a line to the terminal. */
     writeln: (data: string) => void;
-    /** Clear the terminal. */
+    /** Clear the terminal buffer. */
     clear: () => void;
+}
+
+interface TerminalProps {
+    /** Current execution status ("running" | "idle" | etc) */
+    status: string;
 }
 
 /**
  * Terminal Component
  * 
- * A wrapper around xterm.js that provides a read-only, dark-themed log viewer.
- * It handles:
- * - Responsive resizing (via FitAddon)
- * - Copy/Paste support (Ctrl+C)
- * - Custom scrollbar styling
- * - Layout shift prevention using a nested container strategy
+ * A robust wrapper around xterm.js providing a read-only output view.
+ * Features:
+ * - responsive resizing using ResizeObserver
+ * - custom theme matching the IDE
+ * - copy/paste support for read-only selection
  */
-const Terminal = forwardRef<TerminalHandle>((_, ref) => {
-    // 1. Refs for DOM and XTerm instance
-    // mountRef: The inner div where XTerm injects the <canvas>
+const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ status }, ref) => {
+    // Refs
     const mountRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
 
-    // 2. Expose methods to parent
+    // Expose API
     useImperativeHandle(ref, () => ({
         write: (data: string) => xtermRef.current?.write(data),
         writeln: (data: string) => xtermRef.current?.writeln(data),
@@ -41,67 +54,52 @@ const Terminal = forwardRef<TerminalHandle>((_, ref) => {
     }));
 
     useEffect(() => {
-        // Guard: Ensure text selection is possible and preventing re-initialization
         if (!mountRef.current || xtermRef.current) return;
 
-        // 3. Initialize xterm.js
+        // 1. Initialize XTerm Instance
         const term = new XTerm({
             cursorBlink: false,
             cursorStyle: 'bar',
-            disableStdin: true, // Read-only
+            disableStdin: true, // Read-only input
             convertEol: true,
-            fontSize: 14,
-            fontFamily: 'Consolas, "Courier New", monospace',
-            theme: {
-                background: '#1e1e1e', // VS Code Dark
-                foreground: '#cccccc',
-                selectionBackground: '#264f78',
-                cursor: '#1e1e1e', // Hidden cursor
-            },
+            fontSize: 13,
+            lineHeight: 1.5,
+            fontFamily: FONT_FAMILY,
+            theme: TERMINAL_THEME,
             allowProposedApi: true,
+            scrollback: 2000,
         });
 
-        // 4. Attach FitAddon
+        // 2. Attach Fit Addon
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
         fitAddonRef.current = fitAddon;
 
-        // 5. Mount to DOM
+        // 3. Mount to DOM
         term.open(mountRef.current);
         xtermRef.current = term;
 
-        // 6. Custom Key Handler: Enable Ctrl+C Copy
+        // 4. Custom Key Handler (Enable Copy)
         term.attachCustomKeyEventHandler((e) => {
-            // Allow browser default copy if Ctrl+C or Cmd+C is pressed
+            // Allow Ctrl+C / Cmd+C if text is selected
             if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && term.hasSelection()) {
-                return false;
+                return false; // Allow browser default copy behavior
             }
             return true;
         });
 
-        // 7. Robust Fit Function
-        // Suppresses 'dimensions' error caused by race conditions during resize/mount.
-        const safeFit = () => {
-            if (!fitAddonRef.current || !mountRef.current) return;
-            
-            // Skip fitting if element is hidden/collapsed
-            if (mountRef.current.clientWidth === 0) return;
-
+        // 5. Robust Resize Logic
+        const handleResize = () => {
             try {
-                fitAddonRef.current.fit();
+                fitAddon.fit();
             } catch (e) {
-                // Benign error: xterm renderer not ready
+                // Suppress 'dimensions' error if container is hidden/collapsing
             }
         };
 
-        // Initial fit (delayed to ensure paint)
-        requestAnimationFrame(safeFit);
-
-        // 8. Resize Observer
-        const resizeObserver = new ResizeObserver(() => {
-            // Debounce fit calls to animation frame
-            requestAnimationFrame(safeFit);
-        });
+        // Initial fit and observer setup
+        requestAnimationFrame(handleResize);
+        const resizeObserver = new ResizeObserver(() => requestAnimationFrame(handleResize));
         resizeObserver.observe(mountRef.current);
 
         // Cleanup
@@ -109,44 +107,83 @@ const Terminal = forwardRef<TerminalHandle>((_, ref) => {
             resizeObserver.disconnect();
             term.dispose();
             xtermRef.current = null;
+            fitAddonRef.current = null;
         };
     }, []);
 
+    // Derived Status Styles
+    const isRunning = status === 'running';
+    const statusColor = isRunning ? '#dbab09' : '#2ea043';
+    const statusText = isRunning ? 'Running' : 'Ready';
+
     return (
-        // Outer Container: Manages padding and background (Layout)
-        <div style={OUTER_STYLE}>
-            {/* Scrollbar Styles */}
-            <style>{SCROLLBAR_CSS}</style>
+        <div style={CONTAINER_STYLE}>
+             {/* Hide default scrollbar */}
+             <style>{SCROLLBAR_CSS}</style>
             
-            {/* Inner Container: Manages XTerm instance (Content) */}
-            <div ref={mountRef} style={INNER_STYLE} />
+            {/* Status Header */}
+            <div style={STATUS_BAR_STYLE}>
+                <span style={STATUS_TITLE_STYLE}>Terminal</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ 
+                        width: '8px', 
+                        height: '8px', 
+                        borderRadius: '50%', 
+                        backgroundColor: statusColor,
+                        boxShadow: isRunning ? `0 0 8px ${statusColor}` : 'none',
+                        transition: 'all 0.3s'
+                    }} />
+                    <span style={{ fontSize: '12px', color: statusColor, fontWeight: 500 }}>
+                        {statusText}
+                    </span>
+                </div>
+            </div>
+
+            {/* Terminal Mount Point */}
+            <div ref={mountRef} style={MOUNT_STYLE} />
         </div>
     );
 });
 
-// --- Styles ---
-
-const OUTER_STYLE: React.CSSProperties = {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#1e1e1e',
-    padding: '12px',
-    boxSizing: 'border-box',
-    overflow: 'hidden', // Prevent outer scrollbars
-    position: 'relative',
-};
-
-const INNER_STYLE: React.CSSProperties = {
-    width: '100%',
-    height: '100%',
-    overflow: 'hidden', // Contain XTerm scrollbars
-};
+// --- Styles (Extracted for cleanliness) ---
 
 const SCROLLBAR_CSS = `
-    .xterm-viewport::-webkit-scrollbar { width: 10px; }
-    .xterm-viewport::-webkit-scrollbar-track { background: #1e1e1e; }
-    .xterm-viewport::-webkit-scrollbar-thumb { background: #424242; border-radius: 0px; }
-    .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #4f4f4f; }
+    .xterm-viewport::-webkit-scrollbar { display: none; }
 `;
+
+const CONTAINER_STYLE: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden'
+};
+
+const STATUS_BAR_STYLE: React.CSSProperties = {
+    height: '32px',
+    backgroundColor: '#0d1117',
+    borderBottom: '1px solid #30363d',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '0 16px',
+    flexShrink: 0
+};
+
+const STATUS_TITLE_STYLE: React.CSSProperties = {
+    fontSize: '12px',
+    fontWeight: 600,
+    color: '#8b949e',
+    textTransform: 'uppercase',
+    letterSpacing: '1px'
+};
+
+const MOUNT_STYLE: React.CSSProperties = {
+    flex: 1,
+    width: '100%',
+    overflow: 'hidden',
+    // Exact padding requested by user
+    padding: '4px 0 0 8px', 
+};
 
 export default Terminal;
