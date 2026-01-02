@@ -34,24 +34,48 @@ export const useJobRunner = ({ terminalRef }: UseJobRunnerProps) => {
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
+
                 if (msg.type === 'log') {
-                    // Normalize newlines for xterm
-                    const formatted = msg.output.replace(/\n/g, '\r\n');
+                    // Log: Print output to terminal
+                    // Normalize newlines (\n -> \r\n) for xterm.js
+                    const formatted = (msg.output || '').replace(/\n/g, '\r\n');
                     termPrint(formatted);
                 }
+                else if (msg.type === 'status') {
+                    // Status: Handle completion signal
+                    const finalStatus = msg.status; // "completed" or "failed"
+
+                    if (finalStatus === 'completed') {
+                        termPrintln("\r\n\x1b[32m✔ Job Completed Successfully\x1b[0m");
+                    } else if (finalStatus === 'failed') {
+                        termPrintln("\r\n\x1b[31m✘ Job Failed\x1b[0m");
+                    }
+
+                    // Reset state to 'idle' so user can run again
+                    setStatus('idle');
+
+                    // Close the socket as the job is done
+                    ws.close();
+                }
             } catch (e) {
-                console.error("Failed to parse log", e);
+                console.error("Failed to parse WebSocket message", e);
             }
         };
 
         ws.onclose = () => {
+            // We logged completion above, so just specific "Session Ended"
+            // Using grey color for system messages
             termPrintln("\r\n\x1b[90m--- Session Ended ---\x1b[0m");
-            setStatus('completed');
+
+            // Safety: Ensure we go back to idle if socket closes unexpectedly
+            setStatus((prev) => (prev === 'running' ? 'idle' : prev));
         };
 
         ws.onerror = () => {
             termPrintln(`\r\n\x1b[31m[System] WebSocket Connection Error\x1b[0m`);
             setStatus('error');
+            // Allow retry
+            setTimeout(() => setStatus('idle'), 2000);
         };
     }, [termPrint, termPrintln]);
 
@@ -82,7 +106,7 @@ export const useJobRunner = ({ terminalRef }: UseJobRunnerProps) => {
         } catch (error) {
             console.error(error);
             termPrintln(`\r\n\x1b[31;1m[Fatal Error] Failed to submit job: ${error}\x1b[0m`);
-            setStatus('error');
+            setStatus('idle');
         }
     }, [status, terminalRef, connectWebSocket, termPrintln]);
 
