@@ -10,6 +10,7 @@ import (
 
 	"github.com/dontdude/goxec/internal/domain"
 	"github.com/dontdude/goxec/internal/platform/queue"
+	"github.com/dontdude/goxec/internal/platform/web"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -32,16 +33,21 @@ func main() {
 	// 3. Start Log Broadcaster (Background goroutine)
 	go broadcastLogs(redisQ)
 
-	// 4. Setup Router (Standard Lib)
+	// 4. Setup Rate Limiter
+	// Rate: 0.5 tokens/sec (1 request every 2s), Capacity: 5 (Burst)
+	limiter := web.NewRateLimiter(0.5, 5.0)
+
+	// 5. Setup Router (Standard Lib)
 	mux := http.NewServeMux()
 
-	// 5. Register Handlers
-	// Post /submit -> Enqueues Job
-	mux.HandleFunc("POST /submit", handleSubmit(redisQ))
+	// 6. Register Handlers
+	// Post /submit -> Enqueues Job (Wrapped with RateLimit)
+	mux.HandleFunc("POST /submit", limiter.RateLimitMiddleware(handleSubmit(redisQ)))
+
 	// Get /ws -> WebSocket Updgrade
 	mux.HandleFunc("GET /ws", handleWS())
 
-	// 6. Middleware (CORS)
+	// 7. Middleware (CORS)
 	handler := enableCORS(mux)
 
 	slog.Info("API Server starting on :8080")
