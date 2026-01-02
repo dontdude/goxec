@@ -36,5 +36,15 @@ type Job struct {
 type JobResult struct {
 	JobID  string `json:"job_id"`
 	Output string `json:"output"`
+	// Type indicates the message kind: "log" or "status"
+	Type string   `json:"type"`
+	// Status indicates the final job state: "completed", "failed" (only for Type="status")
+	Status string `json:"status,omitempty"`
+
 	Error  error  `json:"-"`
 }
+
+const (
+	ResultTypeLog	 = "log"
+	ResultTypeStatus = "status"
+)

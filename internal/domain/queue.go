@@ -17,7 +17,7 @@ type JobQueue interface {
 	Acknowledge(ctx context.Context, jobID string) error
 
 	// Broadcast publishes the job execution result to the Pub/Sub channel.
-	Broadcast(ctx context.Context, jobID string, output string) error
+	Broadcast(ctx context.Context, result JobResult) error
 
 	// SubscribeLogs returns a channel that streams execution results from all workers.
 	SubscribeLogs(ctx context.Context) (<-chan JobResult, error)

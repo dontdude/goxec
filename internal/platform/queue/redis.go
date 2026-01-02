@@ -146,13 +146,8 @@ func (r *RedisQueue) Acknowledge(ctx context.Context, jobID string) error {
 }
 
 // Broadcast publishes the execution result to the "goxec:logs" channel.
-func (r *RedisQueue) Broadcast(ctx context.Context, jobID string, output string) error {
-	msg := domain.JobResult{
-		JobID:  jobID, 
-		Output: output,
-	}
-
-	data, err := json.Marshal(msg)
+func (r *RedisQueue) Broadcast(ctx context.Context, result domain.JobResult) error {
+	data, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("failed to marshal log: %w", err)
 	}

@@ -64,26 +64,41 @@ func main() {
 			go func(j domain.Job, ch <-chan domain.JobResult) {
 				result := <-ch
 				
-				// 1. Log job execution result
+				// 1. LOG message while job is being executed
+				logMsg := domain.JobResult{
+					JobID:  j.ID,
+					Output: result.Output,
+					Type:   domain.ResultTypeLog,
+				}
 				if result.Error != nil {
-					// Ack failure scenarios to prevent infinite redelivery (until DLQ is implemented).
-					slog.Error("Job Execution Failed", "jobID", j.ID, "error", result.Error)
-				} else {
-					slog.Info("Job Successfully Executed", "jobID", j.ID, "output", result.Output)
+					logMsg.Output = fmt.Sprintf("Error: %v", result.Error)
 				}
 
-				// 2. Broadcast to Pub/Sub
-				// Send the output back to customers.
-				output := result.Output
-				if result.Error != nil {
-					output = fmt.Sprintf("Error: %v", result.Error)
-				}
+				slog.Info("Broadcasting Log", "jobID", j.ID, "output_len", len(logMsg.Output))
 
-				if err := redisQ.Broadcast(context.Background(), j.ID, output); err != nil {
+				// 2. Broadcasting LOG message to Pub/Sub
+				if err := redisQ.Broadcast(context.Background(), logMsg); err != nil {
 					slog.Error("Failed to broadcast log", "jobID", j.ID, "error", err)
 				}
 
-				// 3. Acknowledge processing completion to Redis.
+				// 3. STATUS message after job is executed
+				statusMsg := domain.JobResult{
+					JobID: j.ID,
+					Type:  domain.ResultTypeStatus,
+					Status: "completed",
+				}
+				if result.Error != nil {
+					statusMsg.Status = "failed"
+				}
+
+				slog.Info("Broadcasting Status", "jobID", j.ID, "status", statusMsg.Status)
+
+				// 4. Broadcasting STATUS message to Pub/Sub
+				if err := redisQ.Broadcast(context.Background(), statusMsg); err != nil {
+					slog.Error("Failed to broadcast status", "jobID", j.ID, "error", err)
+				}
+
+				// 5. Acknowledge processing completion to Redis.
 				slog.Info("Acknowledging job", "jobID", j.ID, "streamID", j.RawID)
 				if err := redisQ.Acknowledge(context.Background(), j.RawID); err != nil {
 					slog.Error("Failed to ACK job", "jobID", j.ID, "error", err)

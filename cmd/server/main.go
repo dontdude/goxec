@@ -173,22 +173,19 @@ func broadcastLogs(q domain.JobQueue) {
 		os.Exit(1)
 	}
 
-	for logEntry := range logsCh {
+	for msg := range logsCh {
 		// 1. Check if we have a client connected for this JobID
 		hubMu.RLock()
-		conn, exists := clientHub[logEntry.JobID]
+		conn, exists := clientHub[msg.JobID]
 		hubMu.RUnlock()
 
 		if exists {
 			// 2. Forward the message to the WebSocket
-			// Formatting it as a JSON message for the frontend
-			err := conn.WriteJSON(map[string]string{
-				"type":   "log",
-				"output": logEntry.Output,
-			})
+			// Forwarding the domain.JobResult directly as JSON
+			err := conn.WriteJSON(msg)
 
 			if err != nil {
-				slog.Error("Failed to write to websocket", "jobID", logEntry.JobID, "error", err)
+				slog.Error("Failed to write to websocket", "jobID", msg.JobID, "error", err)
 				// If write fails, we should probably close and remove the connection, 
 				// but just logging it for now
 			}
