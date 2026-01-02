@@ -4,22 +4,36 @@ import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 
 /**
- * TerminalHandle defines the imperative methods exposed to the parent component.
+ * Interface for the imperative handle exposed by the Terminal component.
+ * Allows parent components to control the terminal instance.
  */
 export interface TerminalHandle {
+    /** Write data to the terminal. */
     write: (data: string) => void;
+    /** Write a line to the terminal. */
     writeln: (data: string) => void;
+    /** Clear the terminal. */
     clear: () => void;
 }
 
 /**
- * Terminal wraps the xterm.js library into a React component.
- * It provides a ref-based API to interact with the terminal instance.
+ * Terminal Component
+ * 
+ * A wrapper around xterm.js that provides a read-only, dark-themed log viewer.
+ * It handles:
+ * - Responsive resizing (via FitAddon)
+ * - Copy/Paste support (Ctrl+C)
+ * - Custom scrollbar styling
+ * - Layout shift prevention using a nested container strategy
  */
 const Terminal = forwardRef<TerminalHandle>((_, ref) => {
-    const terminalRef = useRef<HTMLDivElement>(null);
+    // 1. Refs for DOM and XTerm instance
+    // mountRef: The inner div where XTerm injects the <canvas>
+    const mountRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
+    const fitAddonRef = useRef<FitAddon | null>(null);
 
+    // 2. Expose methods to parent
     useImperativeHandle(ref, () => ({
         write: (data: string) => xtermRef.current?.write(data),
         writeln: (data: string) => xtermRef.current?.writeln(data),
@@ -27,79 +41,112 @@ const Terminal = forwardRef<TerminalHandle>((_, ref) => {
     }));
 
     useEffect(() => {
-        let fitAddon: FitAddon | null = null;
-        let resizeListener: (() => void) | null = null;
+        // Guard: Ensure text selection is possible and preventing re-initialization
+        if (!mountRef.current || xtermRef.current) return;
 
-        const initTerminal = () => {
-             if (xtermRef.current || !terminalRef.current) return;
-             if (terminalRef.current.clientWidth === 0 || terminalRef.current.clientHeight === 0) return;
+        // 3. Initialize xterm.js
+        const term = new XTerm({
+            cursorBlink: false,
+            cursorStyle: 'bar',
+            disableStdin: true, // Read-only
+            convertEol: true,
+            fontSize: 14,
+            fontFamily: 'Consolas, "Courier New", monospace',
+            theme: {
+                background: '#1e1e1e', // VS Code Dark
+                foreground: '#cccccc',
+                selectionBackground: '#264f78',
+                cursor: '#1e1e1e', // Hidden cursor
+            },
+            allowProposedApi: true,
+        });
 
-             const term = new XTerm({
-                cursorBlink: true,
-                theme: {
-                    background: '#1e1e1e',
-                    foreground: '#cccccc',
-                },
-                fontSize: 14,
-                fontFamily: 'Consolas, "Courier New", monospace',
-                allowProposedApi: true,
-            });
+        // 4. Attach FitAddon
+        const fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+        fitAddonRef.current = fitAddon;
 
-            fitAddon = new FitAddon();
-            term.loadAddon(fitAddon);
+        // 5. Mount to DOM
+        term.open(mountRef.current);
+        xtermRef.current = term;
 
-            term.open(terminalRef.current);
-            try {
-                fitAddon.fit();
-            } catch (e) {
-                console.warn("Initial fit failed", e);
+        // 6. Custom Key Handler: Enable Ctrl+C Copy
+        term.attachCustomKeyEventHandler((e) => {
+            // Allow browser default copy if Ctrl+C or Cmd+C is pressed
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && term.hasSelection()) {
+                return false;
             }
-            
-            xtermRef.current = term;
+            return true;
+        });
 
-             // Handle window resizes
-             resizeListener = () => {
-                 try {
-                     fitAddon?.fit();
-                 } catch (e) {
-                     console.warn("Resize fit failed", e);
-                 }
-             };
-             window.addEventListener('resize', resizeListener);
+        // 7. Robust Fit Function
+        // Suppresses 'dimensions' error caused by race conditions during resize/mount.
+        const safeFit = () => {
+            if (!fitAddonRef.current || !mountRef.current) return;
+            
+            // Skip fitting if element is hidden/collapsed
+            if (mountRef.current.clientWidth === 0) return;
+
+            try {
+                fitAddonRef.current.fit();
+            } catch (e) {
+                // Benign error: xterm renderer not ready
+            }
         };
 
-        const resizeObserver = new ResizeObserver(() => {
-            if (!xtermRef.current) {
-                initTerminal();
-            } else {
-                try {
-                    fitAddon?.fit();
-                } catch(e) {}
-            }
-        });
-        
-        if (terminalRef.current) {
-            resizeObserver.observe(terminalRef.current);
-        }
+        // Initial fit (delayed to ensure paint)
+        requestAnimationFrame(safeFit);
 
+        // 8. Resize Observer
+        const resizeObserver = new ResizeObserver(() => {
+            // Debounce fit calls to animation frame
+            requestAnimationFrame(safeFit);
+        });
+        resizeObserver.observe(mountRef.current);
+
+        // Cleanup
         return () => {
             resizeObserver.disconnect();
-            if (resizeListener) {
-                window.removeEventListener('resize', resizeListener);
-            }
-            if (xtermRef.current) {
-                xtermRef.current.dispose();
-                xtermRef.current = null;
-            }
+            term.dispose();
+            xtermRef.current = null;
         };
     }, []);
 
     return (
-        <div 
-            ref={terminalRef} 
-            style={{ width: '100%', height: '100%', paddingLeft: '10px' }} 
-        />
+        // Outer Container: Manages padding and background (Layout)
+        <div style={OUTER_STYLE}>
+            {/* Scrollbar Styles */}
+            <style>{SCROLLBAR_CSS}</style>
+            
+            {/* Inner Container: Manages XTerm instance (Content) */}
+            <div ref={mountRef} style={INNER_STYLE} />
+        </div>
     );
 });
+
+// --- Styles ---
+
+const OUTER_STYLE: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#1e1e1e',
+    padding: '12px',
+    boxSizing: 'border-box',
+    overflow: 'hidden', // Prevent outer scrollbars
+    position: 'relative',
+};
+
+const INNER_STYLE: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden', // Contain XTerm scrollbars
+};
+
+const SCROLLBAR_CSS = `
+    .xterm-viewport::-webkit-scrollbar { width: 10px; }
+    .xterm-viewport::-webkit-scrollbar-track { background: #1e1e1e; }
+    .xterm-viewport::-webkit-scrollbar-thumb { background: #424242; border-radius: 0px; }
+    .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #4f4f4f; }
+`;
 
 export default Terminal;
