@@ -28,7 +28,11 @@ func main() {
 	slog.SetDefault(logger)
 
 	// 2. Initialize Redis Queue (as a dependency)
-	redisQ := queue.NewRedisQueue("localhost:6379", "goxec:jobs", "goxec:workers")
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+	redisQ := queue.NewRedisQueue(redisAddr, "goxec:jobs", "goxec:workers")
 
 	// 3. Start Log Broadcaster (Background goroutine)
 	go broadcastLogs(redisQ)

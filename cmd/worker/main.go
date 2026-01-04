@@ -21,7 +21,10 @@ func main() {
 	slog.Info("Starting Goxec Worker Node...")
 
 	// 2. Initialize Config/Adapters
-	redisAddr := "localhost:6379"
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
 	dockerClient := docker.NewClient()
 	redisQ := queue.NewRedisQueue(redisAddr, "goxec:jobs", "goxec:workers")
 
