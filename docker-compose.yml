@@ -1,13 +1,61 @@
-version: "3.8"
+version: '3.8'
+
 services:
+  # 1. Redis Queue
   redis:
     image: redis:alpine
     container_name: goxec-redis
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    networks:
+      - goxec-net
+
+  # 2. REST API Server
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: goxec-server
+    command: ./server
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - redis
+    networks:
+      - goxec-net
+
+  # 3. Job Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: goxec-worker
+    command: ./worker
+    environment:
+      - REDIS_ADDR=redis:6379
+    # CRITICAL: Allow worker to spawn sibling containers
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - redis
+    networks:
+      - goxec-net
+
+  # 4. Frontend (React + Nginx)
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: goxec-web
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    networks:
+      - goxec-net
+
+networks:
+  goxec-net:
+    driver: bridge
