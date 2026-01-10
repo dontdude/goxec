@@ -6,6 +6,8 @@
 ![Redis](https://img.shields.io/badge/Redis-Streams-DC382D?style=flat&logo=redis)
 ![WebSocket](https://img.shields.io/badge/WebSocket-Realtime-blue?style=flat)
 
+![Goxec Client](assets/goxec_client.png)
+
 > Distributed, fault-tolerant remote code execution engine with containerized isolation.
 
 ---
