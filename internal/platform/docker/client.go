@@ -84,6 +84,8 @@ func (c *Client) Run(ctx context.Context, code string, language string) (string,
 		Cmd:   cmd,
 		// Tty must be false to allow multiplexed stdout/stderr for stdcopy
 		Tty: false,
+		// Security: Disable Network to prevent malicious calls
+		NetworkDisabled: true,
 	}, &container.HostConfig{
 		Resources: container.Resources{
 			Memory:    512 * 1024 * 1024, // 512MB
