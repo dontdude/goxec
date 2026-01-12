@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/dontdude/goxec/internal/domain"
 )
@@ -66,9 +67,10 @@ func (p *Pool) worker(id int) {
 	for job := range p.tasksCh {
 		slog.Debug("Processing job", "workerId", id, "jobID", job.ID)
 
-		// Create a separate context for the execution to ensure independent timeouts
-		// In a real app, you might inherit from a parent context or allow the job to specify one.
-		ctx := context.Background()
+		// Create a separate context with hard timeout
+		// This ensures infinite user loops are killed and the worker is freed.
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
 
 		output, err := p.runner.Run(ctx, job.Code, job.Language)
 

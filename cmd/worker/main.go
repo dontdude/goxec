@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/dontdude/goxec/internal/domain"
 	"github.com/dontdude/goxec/internal/platform/docker"
@@ -27,6 +28,10 @@ func main() {
 	}
 	dockerClient := docker.NewClient()
 	redisQ := queue.NewRedisQueue(redisAddr, "goxec:jobs", "goxec:workers")
+	
+	// Start Recovery Routine (Background)
+	// Polls every 1 minute for jobs pending > 1 minute
+	go redisQ.StartRecoveryRoutine(context.Background(), 1*time.Minute, 1*time.Minute)
 
 	// 3. Initialize Worker Pool (Concurrency: 3)
 	concurrency := 3
